@@ -1,0 +1,253 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+
+namespace SCADA_WaterManagementSystem
+{
+    // Датчик для моніторингу параметрів системи
+    public class Sensor
+    {
+        public string Type { get; private set; } // Тип датчика
+        public double CurrentValue { get; private set; } // Поточне значення
+        public double MinValue { get; private set; } // Мінімальне допустиме значення
+        public double MaxValue { get; private set; } // Максимальне допустиме значення
+        public bool IsOperational { get; private set; } // Стан датчика
+
+        public Sensor(string type, double minValue, double maxValue)
+        {
+            Type = type;
+            MinValue = minValue;
+            MaxValue = maxValue;
+            IsOperational = true;
+        }
+
+        public double ReadValue()
+        {
+            Random random = new Random();
+            CurrentValue = random.NextDouble() * (MaxValue - MinValue) + MinValue;
+            return CurrentValue;
+        }
+
+        public bool IsOutOfRange()
+        {
+            return CurrentValue < MinValue || CurrentValue > MaxValue;
+        }
+
+        public void Calibrate(double newMin, double newMax)
+        {
+            MinValue = newMin;
+            MaxValue = newMax;
+            Console.WriteLine($"Sensor '{Type}' calibrated: Min={MinValue}, Max={MaxValue}");
+        }
+    }
+
+    // Виконавчий механізм для управління
+    public class Actuator
+    {
+        public string Type { get; private set; } // Тип механізму
+        public double CurrentLevel { get; private set; } // Рівень впливу
+        public bool IsActive { get; private set; } // Стан механізму
+
+        public Actuator(string type)
+        {
+            Type = type;
+            CurrentLevel = 0;
+            IsActive = false;
+        }
+
+        public void Start()
+        {
+            IsActive = true;
+            Console.WriteLine($"Actuator '{Type}' started.");
+        }
+
+        public void Stop()
+        {
+            IsActive = false;
+            CurrentLevel = 0;
+            Console.WriteLine($"Actuator '{Type}' stopped.");
+        }
+
+        public void AdjustPower(double level)
+        {
+            if (IsActive)
+            {
+                CurrentLevel = Math.Clamp(level, 0, 100);
+                Console.WriteLine($"Actuator '{Type}' power adjusted to {CurrentLevel}%.");
+            }
+            else
+            {
+                Console.WriteLine($"Actuator '{Type}' is not active. Cannot adjust power.");
+            }
+        }
+    }
+
+    // Контролер для управління
+    public class Controller
+    {
+        public double CalculateAction(double currentValue, double targetValue, double kP, double kI)
+        {
+            double error = targetValue - currentValue;
+            double action = kP * error + kI * (error / 2);
+            return Math.Clamp(action, 0, 100);
+        }
+
+        public bool CheckForErrors(Sensor sensor)
+        {
+            if (sensor.IsOutOfRange())
+            {
+                Console.WriteLine($"Error: Sensor '{sensor.Type}' out of range! Value={sensor.CurrentValue}");
+                return true;
+            }
+            return false;
+        }
+    }
+
+    // Менеджер подій
+    public class EventManager
+    {
+        private List<string> eventLog = new List<string>();
+
+        public void LogEvent(string message)
+        {
+            string timestampedMessage = $"[{DateTime.Now}] {message}";
+            eventLog.Add(timestampedMessage);
+            Console.WriteLine(timestampedMessage);
+        }
+
+        public void SaveLogToFile(string filePath)
+        {
+            File.WriteAllLines(filePath, eventLog);
+            Console.WriteLine($"Event log saved to {filePath}");
+        }
+
+        public void SendNotification(string message)
+        {
+            // Інтеграція з email або SMS сервісами
+            Console.WriteLine($"Notification sent: {message}");
+        }
+
+        public List<string> GetEventLog()
+        {
+            return eventLog;
+        }
+    }
+
+    // Система водовідведення SCADA
+    public class SCADA_WaterManagementSystem
+    {
+        private List<Sensor> sensors = new List<Sensor>();
+        private List<Actuator> actuators = new List<Actuator>();
+        private Controller controller = new Controller();
+        private EventManager eventManager = new EventManager();
+
+        public void AddSensor(Sensor sensor)
+        {
+            sensors.Add(sensor);
+            eventManager.LogEvent($"Sensor '{sensor.Type}' added.");
+        }
+
+        public void AddActuator(Actuator actuator)
+        {
+            actuators.Add(actuator);
+            eventManager.LogEvent($"Actuator '{actuator.Type}' added.");
+        }
+
+        public void StartSystem()
+        {
+            Console.WriteLine("Starting SCADA water management system...");
+            foreach (var actuator in actuators)
+            {
+                actuator.Start();
+            }
+            eventManager.LogEvent("System started.");
+        }
+
+        public void StopSystem()
+        {
+            Console.WriteLine("Stopping SCADA water management system...");
+            foreach (var actuator in actuators)
+            {
+                actuator.Stop();
+            }
+            eventManager.LogEvent("System stopped.");
+        }
+
+        public void MonitorSystem(double targetWaterLevel, double targetPressure)
+        {
+            foreach (var sensor in sensors)
+            {
+                sensor.ReadValue();
+                Console.WriteLine($"Sensor '{sensor.Type}' value: {sensor.CurrentValue}");
+                if (controller.CheckForErrors(sensor))
+                {
+                    eventManager.LogEvent($"Error detected in sensor '{sensor.Type}'.");
+                    eventManager.SendNotification($"Critical: Sensor '{sensor.Type}' out of range.");
+                }
+            }
+
+            var waterLevelSensor = sensors.Find(s => s.Type == "WaterLevel");
+            var pump = actuators.Find(a => a.Type == "Pump");
+            if (waterLevelSensor != null && pump != null)
+            {
+                double action = controller.CalculateAction(waterLevelSensor.CurrentValue, targetWaterLevel, 1.0, 0.5);
+                pump.AdjustPower(action);
+                eventManager.LogEvent($"Pump power adjusted to {action}% based on water level.");
+            }
+
+            var pressureSensor = sensors.Find(s => s.Type == "Pressure");
+            var valve = actuators.Find(a => a.Type == "Valve");
+            if (pressureSensor != null && valve != null)
+            {
+                double action = controller.CalculateAction(pressureSensor.CurrentValue, targetPressure, 1.0, 0.5);
+                valve.AdjustPower(action);
+                eventManager.LogEvent($"Valve power adjusted to {action}% based on pressure.");
+            }
+        }
+
+        public void ExportReport(string filePath)
+        {
+            eventManager.SaveLogToFile(filePath);
+        }
+
+        public void DisplayEventLog()
+        {
+            Console.WriteLine("--- Event Log ---");
+            foreach (var log in eventManager.GetEventLog())
+            {
+                Console.WriteLine(log);
+            }
+        }
+    }
+
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var system = new SCADA_WaterManagementSystem();
+
+            system.AddSensor(new Sensor("WaterLevel", 1.0, 10.0));
+            system.AddSensor(new Sensor("Pressure", 0.5, 5.0));
+
+            system.AddActuator(new Actuator("Pump"));
+            system.AddActuator(new Actuator("Valve"));
+
+            system.StartSystem();
+
+            double targetWaterLevel = 5.0;
+            double targetPressure = 2.5;
+
+            Console.WriteLine("Monitoring system...");
+            for (int i = 0; i < 5; i++)
+            {
+                system.MonitorSystem(targetWaterLevel, targetPressure);
+                System.Threading.Thread.Sleep(2000);
+            }
+
+            system.ExportReport("EventLog.txt");
+            system.DisplayEventLog();
+            system.StopSystem();
+            Console.WriteLine("System shutdown complete.");
+        }
+    }
+}
